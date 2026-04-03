@@ -56,7 +56,7 @@ def create_signal():
 
     # TODO: Load Data
     df = load_data()
-    
+       
     # TODO: Add your signal logic here (remember alpha logic)
     # update skewness calculation
     df = df.with_columns((pl.col('specific_return').truediv(100)).alias('specific_return')) #return space
