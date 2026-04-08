@@ -30,8 +30,8 @@ data = sfd.load_assets(
     in_universe=True,
 ).with_columns(pl.col("return",  "specific_return", "specific_risk").truediv(100))
 
-T=5
-days=T*21
+# T=5
+# days=T*21
 
 df = data.sort(["barrid", "date"])
 
@@ -65,32 +65,50 @@ monthly_df = df.group_by(["barrid", "yyyymm"]).agg([
     pl.col("return").last().alias("return")
 ])
 
-# We'll shift by 1 month to skip last month
-T = 12 
+T = 12
 monthly_df = monthly_df.sort(["barrid","yyyymm"])
 
+# current period
 monthly_df = monthly_df.with_columns([
     # MOMENTUM
-    pl.col("specific_return").log1p().shift(1).rolling_sum(window_size=T).over("barrid").alias("mom_12m"),
+    pl.col("specific_return").log1p().shift(1).rolling_sum(window_size=T).over("barrid").alias("curmom"),
     
     # volitility
-    pl.col("specific_return").shift(1).rolling_std(window_size=T).over("barrid").alias("vol_12m"),
+    pl.col("specific_return").shift(1).rolling_std(window_size=T).over("barrid").alias("curvol"),
     
     # Skewness
-    pl.col("specific_return").shift(1).rolling_skew(window_size=T).over("barrid").alias("skew_12m"),
+    pl.col("specific_return").shift(1).rolling_skew(window_size=T).over("barrid").alias("curskew"),
     
     # Turnover
-    pl.col("turnover").shift(1).rolling_mean(window_size=T).over("barrid").alias("turn_12m")
-])
+    pl.col("turnover").shift(1).rolling_mean(window_size=T).over("barrid").alias("curturn")])
+
+# previous
+monthly_df = monthly_df.with_columns([
+    # MOMENTUM
+    pl.col("specific_return").log1p().shift(1+T).rolling_sum(window_size=T).over("barrid").alias("prevmom"),
+    
+    # volitility
+    pl.col("specific_return").shift(1+T).rolling_std(window_size=T).over("barrid").alias("prevvol"),
+    
+    # Skewness
+    pl.col("specific_return").shift(1+T).rolling_skew(window_size=T).over("barrid").alias("prevskew"),
+    
+    # Turnover
+    pl.col("turnover").shift(1+T).rolling_mean(window_size=T).over("barrid").alias("prevturn"),
+    
+    # mktcap
+    pl.col("log_mktcap").shift(1+T).over("barrid").alias("prevlog_mktcap")])
+
+    
 print('check2')
 
 # Drop rows with missing values
-monthly_df = monthly_df.drop_nulls(["mom_12m", "vol_12m", "skew_12m", "turn_12m", "log_mktcap"])
+monthly_df = monthly_df.drop_nulls(["curmom", "curvol", "curskew", "curturn", "log_mktcap", "prevmom", "prevvol", "prevskew", "prevturn", "prevlog_mktcap"])
 print('check3')
 # ols per mounth
 def cross_sectional_ols(df_month):
-    X = df_month[["skew_12m","vol_12m","mom_12m","turn_12m","log_mktcap"]]
-    y = df_month["specific_return"]  
+    X = df_month[["prevmom", "prevvol", "prevskew", "prevturn", "prevlog_mktcap"]]
+    y = df_month["curskew"]  
     X = sm.add_constant(X)
     model = sm.OLS(y, X).fit()
     return model.params
@@ -98,7 +116,7 @@ def cross_sectional_ols(df_month):
 # Shift skew by -1 month to get next month skew
 monthly_df = monthly_df.sort(["barrid","yyyymm"])
 monthly_df = monthly_df.with_columns(
-    pl.col("skew_12m").shift(-1).over("barrid").alias("skew_next")  
+    pl.col("curskew").shift(-1).over("barrid").alias("skew_next")  
 )
 
 monthly_df = monthly_df.drop_nulls(["skew_next"])
@@ -107,26 +125,26 @@ monthly_df = monthly_df.drop_nulls(["skew_next"])
 coeffs_list = []
 
 for month, df_month in monthly_df.group_by("yyyymm"):
-    df_month_pd = df_month.to_pandas()  # statsmodels expects pandas
+    df_month_pd = df_month.to_pandas()
     params = cross_sectional_ols(df_month_pd)
     coeffs_list.append(params)
 
 coeffs_df = pd.DataFrame(coeffs_list)
 print('check4')
 # average coefficients over months
-avg_coeffs = coeffs_df.mean()
+avgcoeffs = coeffs_df.mean()
 
-print(avg_coeffs)
+print(avgcoeffs)
 
 # Compute expected skewness using past characteristics
 monthly_df = monthly_df.with_columns(
     (
-        avg_coeffs["const"]
-        + avg_coeffs["skew_12m"] * pl.col("skew_12m")
-        + avg_coeffs["vol_12m"] * pl.col("vol_12m")
-        + avg_coeffs["mom_12m"] * pl.col("mom_12m")
-        + avg_coeffs["turn_12m"] * pl.col("turn_12m")
-        + avg_coeffs["log_mktcap"] * pl.col("log_mktcap")
+        avgcoeffs["const"]
+        + avgcoeffs["prevskew"] * pl.col("curskew")
+        + avgcoeffs["prevvol"] * pl.col("curvol")
+        + avgcoeffs["prevmom"] * pl.col("curmom")
+        + avgcoeffs["prevturn"] * pl.col("curturn")
+        + avgcoeffs["prevlog_mktcap"] * pl.col("log_mktcap")
     ).alias(signal_name)
 )
 
