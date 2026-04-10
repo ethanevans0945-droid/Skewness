@@ -9,7 +9,7 @@ import pandas as pd
 
 start = dt.date(2000, 1, 1)
 end = dt.date(2024, 12, 31)
-signal_name = "IS2"
+signal_name = "IS22"
 price_filter = 5
 IC = 0.05
 
@@ -51,7 +51,6 @@ df = df.with_columns([
 df = df.with_columns(
     (pl.col("date_dt").dt.year() * 100 + pl.col("date_dt").dt.month()).alias("yyyymm")
 )
-print("check1")
 
 # last trading day per month
 monthly_df = df.group_by(["barrid", "yyyymm"]).agg([
@@ -100,18 +99,18 @@ monthly_df = monthly_df.with_columns([
     pl.col("log_mktcap").shift(1+T).over("barrid").alias("prevlog_mktcap")])
 
     
-print('check2')
 
 # Drop rows with missing values
 monthly_df = monthly_df.drop_nulls(["curmom", "curvol", "curskew", "curturn", "log_mktcap", "prevmom", "prevvol", "prevskew", "prevturn", "prevlog_mktcap"])
-print('check3')
+
 # ols per mounth
 def cross_sectional_ols(df_month):
     X = df_month[["prevmom", "prevvol", "prevskew", "prevturn", "prevlog_mktcap"]]
     y = df_month["curskew"]  
     X = sm.add_constant(X)
     model = sm.OLS(y, X).fit()
-    return model.params
+    coef_dict = model.params.to_dict()
+    return model
 
 # Shift skew by -1 month to get next month skew
 monthly_df = monthly_df.sort(["barrid","yyyymm"])
@@ -123,28 +122,36 @@ monthly_df = monthly_df.drop_nulls(["skew_next"])
 
 # run cross-sectional regression
 coeffs_list = []
+monthly= []
+monthly_df = monthly_df.sort(["barrid","yyyymm"])
+
 
 for month, df_month in monthly_df.group_by("yyyymm"):
     df_month_pd = df_month.to_pandas()
-    params = cross_sectional_ols(df_month_pd)
-    coeffs_list.append(params)
+    model = cross_sectional_ols(df_month_pd)
+    coeffs_list.append(model)
+    params = model.params.to_dict()
 
-coeffs_df = pd.DataFrame(coeffs_list)
-print('check4')
-# average coefficients over months
-avgcoeffs = coeffs_df.mean()
+    monthly.append([month[0], params['const'],params['prevmom'], params['prevvol'], params['prevskew'], params['prevturn'], params['prevlog_mktcap']])
 
+# monthly1 has all of the monthly results of the regression, merges it onto monthly_df
+monthly1 = pd.DataFrame(monthly, columns=['yyyymm', 'const', 'Bprevmom', 'Bprevvol', 'Bprevskew', 'Bprevturn', 'Bprevlog_mktcap'])
+monthly1 = pl.from_pandas(monthly1)
+monthly_df= monthly_df.join(monthly1, on='yyyymm', how='left')
+
+
+avgcoeffs = monthly1[['const', 'Bprevmom', 'Bprevvol', 'Bprevskew', 'Bprevturn', 'Bprevlog_mktcap']].mean()
 print(avgcoeffs)
 
 # Compute expected skewness using past characteristics
 monthly_df = monthly_df.with_columns(
     (
-        avgcoeffs["const"]
-        + avgcoeffs["prevskew"] * pl.col("curskew")
-        + avgcoeffs["prevvol"] * pl.col("curvol")
-        + avgcoeffs["prevmom"] * pl.col("curmom")
-        + avgcoeffs["prevturn"] * pl.col("curturn")
-        + avgcoeffs["prevlog_mktcap"] * pl.col("log_mktcap")
+        pl.col("const")
+        + pl.col("Bprevskew") * pl.col("curskew")
+        + pl.col("Bprevvol") * pl.col("curvol")
+        + pl.col("Bprevmom") * pl.col("curmom")
+        + pl.col("Bprevturn") * pl.col("curturn")
+        + pl.col("Bprevlog_mktcap") * pl.col("log_mktcap")
     ).alias(signal_name)
 )
 
@@ -183,5 +190,6 @@ alphas = (
     .select("date", "barrid", "alpha", "predicted_beta", "return")
     .sort("date", "barrid")
 )
-
+print(alphas)
+alphas = alphas.drop_nulls()
 alphas.write_parquet(f"{signal_name}_alphas.parquet")
