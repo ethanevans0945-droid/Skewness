@@ -102,13 +102,13 @@ monthly_df = df.group_by(["barrid", "yyyymm"]).agg([
 
 monthly_df = monthly_df.with_columns(pl.col('market_cap').shift(1).alias('mktcap_lag'))
 
-T = 12
+T = 60
 monthly_df = monthly_df.sort(["barrid","yyyymm"])
 
 # # current period
 monthly_df = monthly_df.with_columns([
     # MOMENTUM
-    pl.col("specific_return").log1p().shift(1).rolling_sum(window_size=T).over("barrid").alias("curmom"),
+    pl.col("specific_return").log1p().shift(1).rolling_sum(window_size=12).over("barrid").alias("curmom"),
     
     # volitility
     pl.col("specific_return").shift(1).rolling_std(window_size=T).over("barrid").alias("curvol"),
@@ -117,7 +117,8 @@ monthly_df = monthly_df.with_columns([
     pl.col("specific_return").shift(1).rolling_skew(window_size=T).over("barrid").alias("curskew"),
     
     # Turnover
-    pl.col("turnover").shift(1).rolling_mean(window_size=T).over("barrid").alias("curturn")])
+    # pl.col("turnover").shift(1).rolling_mean(window_size=T).over("barrid").alias("curturn")])
+    pl.col("turnover").shift(1).over("barrid").alias("curturn")])
 
 
 
@@ -125,7 +126,7 @@ monthly_df = monthly_df.with_columns([
 # # previous
 monthly_df = monthly_df.with_columns([
 #     # MOMENTUM
-    pl.col("specific_return").log1p().shift(1+T).rolling_sum(window_size=T).over("barrid").alias("prevmom"),
+    pl.col("specific_return").log1p().shift(1+T).rolling_sum(window_size=12).over("barrid").alias("prevmom"),
     
     # volitility
     pl.col("specific_return").shift(1+T).rolling_std(window_size=T).over("barrid").alias("prevvol"),
@@ -134,7 +135,9 @@ monthly_df = monthly_df.with_columns([
     pl.col("specific_return").shift(1+T).rolling_skew(window_size=T).over("barrid").alias("prevskew"),
     
     # Turnover
-    pl.col("turnover").shift(1+T).rolling_mean(window_size=T).over("barrid").alias("prevturn"),
+    # pl.col("turnover").shift(1+T).rolling_mean(window_size=T).over("barrid").alias("prevturn"),
+    pl.col("turnover").shift(1+T).over("barrid").alias("prevturn"),
+
     
     # mktcap
     pl.col("mktb1").shift(1).over("barrid").alias("prevmktb1"),
