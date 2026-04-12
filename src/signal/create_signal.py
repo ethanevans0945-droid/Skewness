@@ -9,7 +9,7 @@ import pandas as pd
 
 start = dt.date(1987, 1, 1)
 end = dt.date(2023, 12, 31)
-signal_name = "IS2"
+signal_name = "IS"
 price_filter = 5
 IC = 0.05
 # print(sfd.get_assets_columns())
@@ -68,9 +68,9 @@ df = df.with_columns(
 ).to_dummies("mktcap_bin")
 
 
-df = df.with_columns(pl.col('mktcap_bin_3.0').alias('mktb3'))
-df = df.with_columns(pl.col('mktcap_bin_2.0').alias('mktb2'))
-df = df.with_columns(pl.col('mktcap_bin_1.0').alias('mktb1'))
+df = df.with_columns(pl.col('mktcap_bin_3.0').alias('curmktb3'))
+df = df.with_columns(pl.col('mktcap_bin_2.0').alias('curmktb2'))
+df = df.with_columns(pl.col('mktcap_bin_1.0').alias('curmktb1'))
 df = df.drop(['rank', 'mktcap_bin_3.0', 'mktcap_bin_2.0', 'mktcap_bin_1.0'])
 # df = df.with_columns(
 #     pl.col("market_cap")
@@ -86,6 +86,51 @@ df = df.drop(['rank', 'mktcap_bin_3.0', 'mktcap_bin_2.0', 'mktcap_bin_1.0'])
 
 # print(df)
 
+
+
+T = 60
+days= 21*T
+df = df.sort(["barrid","yyyymm"])
+
+# # current period
+df = df.with_columns([
+    # MOMENTUM
+    pl.col("specific_return").log1p().shift(42).rolling_sum(window_size=12*21).over("barrid").alias("curmom"),
+    
+    # volitility
+    pl.col("specific_return").shift(0).rolling_std(window_size=days).over("barrid").alias("curvol"),
+    
+    # Skewness
+    pl.col("specific_return").shift(0).rolling_skew(window_size=days).over("barrid").alias("curskew"),
+    
+    # Turnover
+    # pl.col("turnover").shift(1).rolling_mean(window_size=T).over("barrid").alias("curturn")])
+    pl.col("turnover").shift(21).rolling_sum(window_size=days).over("barrid").alias("curturn")])
+
+
+
+    # mktbin
+# # previous
+df = df.with_columns([
+#     # MOMENTUM
+    pl.col("specific_return").log1p().shift(days+42).rolling_sum(window_size=12*21).over("barrid").alias("prevmom"),
+    
+    # volitility
+    pl.col("specific_return").shift(days+21).rolling_std(window_size=days).over("barrid").alias("prevvol"),
+    
+    # Skewness
+    pl.col("specific_return").shift(days).rolling_skew(window_size=days).over("barrid").alias("prevskew"),
+    
+    # Turnover
+    # pl.col("turnover").shift(1+T).rolling_mean(window_size=T).over("barrid").alias("prevturn"),
+    pl.col("turnover").shift(days+21).rolling_sum(window_size=days).over("barrid").alias("prevturn"),
+
+    
+    # mktcap
+    pl.col("curmktb1").shift(21).over("barrid").alias("prevmktb1"),
+    pl.col("curmktb2").shift(21).over("barrid").alias("prevmktb2"),
+    pl.col("curmktb3").shift(21).over("barrid").alias("prevmktb3")])
+
 # # last trading day per month
 monthly_df = df.group_by(["barrid", "yyyymm"]).agg([
     pl.col("specific_return").last().alias("specific_return"),
@@ -96,54 +141,29 @@ monthly_df = df.group_by(["barrid", "yyyymm"]).agg([
     pl.col("specific_risk").last().alias("specific_risk"),
     pl.col("date").last().alias("date"),
     pl.col("return").last().alias("return"),
-    pl.col("mktb2").last().alias("mktb2"),
-    pl.col("mktb1").last().alias("mktb1")
+    
+    pl.col("prevmktb2").last().alias("prevmktb2"),
+    pl.col("prevmktb1").last().alias("prevmktb1"),
+    pl.col("curmktb2").last().alias("curmktb2"),
+    pl.col("curmktb1").last().alias("curmktb1"),
+    pl.col("curmktb3").last().alias("curmktb3"),
+    pl.col("prevmktb3").last().alias("prevmktb3"), 
+    
+    pl.col("prevmom").last().alias("prevmom"),
+    pl.col("prevturn").last().alias("prevturn"),   
+    pl.col("prevskew").last().alias("prevskew"),
+    pl.col("prevvol").last().alias("prevvol"),   
+    
+    pl.col("curmom").last().alias("curmom"),
+    pl.col("curturn").last().alias("curturn"),   
+    pl.col("curskew").last().alias("curskew"),
+    pl.col("curvol").last().alias("curvol"), 
+    
 ])
 
 monthly_df = monthly_df.with_columns(pl.col('market_cap').shift(1).alias('mktcap_lag'))
 
-T = 60
-monthly_df = monthly_df.sort(["barrid","yyyymm"])
 
-# # current period
-monthly_df = monthly_df.with_columns([
-    # MOMENTUM
-    pl.col("specific_return").log1p().shift(1).rolling_sum(window_size=12).over("barrid").alias("curmom"),
-    
-    # volitility
-    pl.col("specific_return").shift(1).rolling_std(window_size=T).over("barrid").alias("curvol"),
-    
-    # Skewness
-    pl.col("specific_return").shift(1).rolling_skew(window_size=T).over("barrid").alias("curskew"),
-    
-    # Turnover
-    # pl.col("turnover").shift(1).rolling_mean(window_size=T).over("barrid").alias("curturn")])
-    pl.col("turnover").shift(1).over("barrid").alias("curturn")])
-
-
-
-    # mktbin
-# # previous
-monthly_df = monthly_df.with_columns([
-#     # MOMENTUM
-    pl.col("specific_return").log1p().shift(1+T).rolling_sum(window_size=12).over("barrid").alias("prevmom"),
-    
-    # volitility
-    pl.col("specific_return").shift(1+T).rolling_std(window_size=T).over("barrid").alias("prevvol"),
-    
-    # Skewness
-    pl.col("specific_return").shift(1+T).rolling_skew(window_size=T).over("barrid").alias("prevskew"),
-    
-    # Turnover
-    # pl.col("turnover").shift(1+T).rolling_mean(window_size=T).over("barrid").alias("prevturn"),
-    pl.col("turnover").shift(1+T).over("barrid").alias("prevturn"),
-
-    
-    # mktcap
-    pl.col("mktb1").shift(1).over("barrid").alias("prevmktb1"),
-    pl.col("mktb2").shift(1).over("barrid").alias("prevmktb2")])
-
-    
 
 # # Drop rows with missing values
 monthly_df = monthly_df.drop_nulls(["curmom", "curvol", "curskew", "curturn", "market_cap", "prevmom", "prevvol", "prevskew", "prevturn",'prevmktb1', 'prevmktb2'])
@@ -186,7 +206,7 @@ monthly_df= monthly_df.join(monthly1, on='yyyymm', how='left')
 
 
 avgcoeffs = monthly1[['const', 'Bprevmom', 'Bprevvol', 'Bprevskew', 'Bprevturn', 'Bprevmktb1', 'Bprevmktb2']].mean()
-# print(avgcoeffs)
+print(avgcoeffs)
 
 # # Compute expected skewness using past characteristics
 monthly_df = monthly_df.with_columns(
@@ -196,12 +216,13 @@ monthly_df = monthly_df.with_columns(
         + pl.col("Bprevvol") * pl.col("curvol")
         + pl.col("Bprevmom") * pl.col("curmom")
         + pl.col("Bprevturn") * pl.col("curturn")
-        + pl.col("Bprevmktb1") * pl.col("mktb1")
-        + pl.col("Bprevmktb2") * pl.col('mktb2')
+        + pl.col("Bprevmktb1") * pl.col("curmktb1")
+        + pl.col("Bprevmktb2") * pl.col('curmktb2')
     ).alias(signal_name)
 )
 
-
+# is this part right
+# monthly_df= monthly_df.with_columns(pl.col(signal_name).shift(1).alias(signal_name))
 
 
 # print('check5')
